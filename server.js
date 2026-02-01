@@ -73,7 +73,7 @@ app.post('/grok', async (req, res) => {
 // PERPLEXITY
 app.post('/perplexity', async (req, res) => {
   try {
-    const { model = 'llama-3.1-sonar-small-128k-online', messages, max_tokens = 500, apiKey } = req.body;
+    const { model = 'sonar', messages, max_tokens = 500, apiKey } = req.body;
     const key = apiKey || API_KEYS.perplexity;
     
     if (!key) return res.status(400).json({ error: 'No API key' });
@@ -123,7 +123,7 @@ app.post('/deepseek', async (req, res) => {
 // COHERE
 app.post('/cohere', async (req, res) => {
   try {
-    const { model = 'command', message, chat_history = [], apiKey } = req.body;
+    const { model = 'command-r', message, chat_history = [], apiKey } = req.body;
     const key = apiKey || API_KEYS.cohere;
     
     if (!key) return res.status(400).json({ error: 'No API key' });
@@ -178,7 +178,7 @@ app.post('/gemini', async (req, res) => {
     
     if (!key) return res.status(400).json({ error: 'No API key' });
     
-    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${key}`, {
+    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${key}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ contents })
