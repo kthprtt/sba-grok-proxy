@@ -317,44 +317,66 @@ app.post('/balldontlie', async (req, res) => {
     
     if (!key) return res.status(400).json({ error: 'No API key', note: 'Add BALLDONTLIE_API_KEY' });
     
-    // New API uses /nba/v1/ path
-    const searchUrl = `https://api.balldontlie.io/nba/v1/players?search=${encodeURIComponent(player)}`;
-    const searchResponse = await fetch(searchUrl, {
+    console.log('BallDontLie search for:', player);
+    
+    // Search for player - try both v1 and nba/v1 paths
+    let searchUrl = `https://api.balldontlie.io/v1/players?search=${encodeURIComponent(player)}`;
+    let searchResponse = await fetch(searchUrl, {
       headers: { 'Authorization': key }
     });
     
-    if (!searchResponse.ok) throw new Error(`HTTP ${searchResponse.status}`);
+    // If v1 fails, try nba/v1
+    if (!searchResponse.ok) {
+      console.log('v1 failed, trying nba/v1...');
+      searchUrl = `https://api.balldontlie.io/nba/v1/players?search=${encodeURIComponent(player)}`;
+      searchResponse = await fetch(searchUrl, {
+        headers: { 'Authorization': key }
+      });
+    }
+    
+    console.log('BallDontLie status:', searchResponse.status);
+    
+    if (!searchResponse.ok) {
+      const errorText = await searchResponse.text();
+      console.error('BallDontLie error:', errorText);
+      throw new Error(`HTTP ${searchResponse.status}: ${errorText.substring(0, 100)}`);
+    }
     
     const searchData = await searchResponse.json();
+    console.log('BallDontLie results:', searchData.data?.length || 0);
     
     if (!searchData.data || searchData.data.length === 0) {
-      return res.json({ found: false, note: 'Player not found' });
+      return res.json({ found: false, note: 'Player not found', searchedFor: player });
     }
     
     const playerData = searchData.data[0];
     
-    // Get season averages with season parameter
-    const statsUrl = `https://api.balldontlie.io/nba/v1/season_averages?season=${season}&player_id=${playerData.id}`;
-    const statsResponse = await fetch(statsUrl, {
-      headers: { 'Authorization': key }
-    });
-    
-    if (statsResponse.ok) {
-      const statsData = await statsResponse.json();
-      const stats = statsData.data?.[0];
-      
-      return res.json({
-        found: true,
-        player: playerData,
-        season: season,
-        seasonAvg: stats?.pts?.toFixed(1) || null,
-        reb: stats?.reb?.toFixed(1) || null,
-        ast: stats?.ast?.toFixed(1) || null,
-        gamesPlayed: stats?.games_played || null
+    // Try to get season averages
+    let stats = null;
+    try {
+      const statsUrl = `https://api.balldontlie.io/v1/season_averages?season=${season}&player_id=${playerData.id}`;
+      const statsResponse = await fetch(statsUrl, {
+        headers: { 'Authorization': key }
       });
+      
+      if (statsResponse.ok) {
+        const statsData = await statsResponse.json();
+        stats = statsData.data?.[0];
+      }
+    } catch (statsError) {
+      console.log('Stats fetch failed:', statsError.message);
     }
     
-    res.json({ found: true, player: playerData, seasonAvg: null });
+    return res.json({
+      found: true,
+      player: playerData,
+      season: season,
+      seasonAvg: stats?.pts?.toFixed(1) || null,
+      reb: stats?.reb?.toFixed(1) || null,
+      ast: stats?.ast?.toFixed(1) || null,
+      gamesPlayed: stats?.games_played || null
+    });
+    
   } catch (error) {
     console.error('BallDontLie error:', error.message);
     res.status(500).json({ error: error.message });
@@ -408,11 +430,28 @@ app.get('/test/balldontlie', async (req, res) => {
     const key = API_KEYS.balldontlie;
     if (!key) return res.json({ error: 'No BALLDONTLIE_API_KEY set' });
     
-    const url = `https://api.balldontlie.io/nba/v1/players?search=LeBron`;
-    const response = await fetch(url, { headers: { 'Authorization': key } });
+    // Try v1 first
+    let url = `https://api.balldontlie.io/v1/players?search=LeBron`;
+    let response = await fetch(url, { headers: { 'Authorization': key } });
+    
+    if (!response.ok) {
+      // Try nba/v1
+      url = `https://api.balldontlie.io/nba/v1/players?search=LeBron`;
+      response = await fetch(url, { headers: { 'Authorization': key } });
+    }
+    
     const data = await response.json().catch(() => response.text());
     
-    res.json({ status: response.status, found: data?.data?.[0]?.first_name + ' ' + data?.data?.[0]?.last_name });
+    if (data?.data?.[0]) {
+      res.json({ 
+        status: response.status, 
+        found: data.data[0].first_name + ' ' + data.data[0].last_name,
+        playerId: data.data[0].id,
+        endpoint: url
+      });
+    } else {
+      res.json({ status: response.status, error: 'No results', data: data });
+    }
   } catch (error) {
     res.json({ error: error.message });
   }
