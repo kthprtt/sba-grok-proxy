@@ -48,7 +48,7 @@ app.get('/', (req, res) => {
 // GROK (xAI)
 app.post('/grok', async (req, res) => {
   try {
-    const { model = 'grok-beta', messages, max_tokens = 500 } = req.body;
+    const { model = 'grok-3-mini', messages, max_tokens = 500 } = req.body;
     const apiKey = req.headers.authorization?.replace('Bearer ', '') || API_KEYS.grok;
     
     if (!apiKey) return res.status(400).json({ error: 'No API key' });
