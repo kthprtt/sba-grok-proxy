@@ -20,15 +20,19 @@ const API_KEYS = {
   betburger: process.env.BETBURGER_API_KEY,
   poe: process.env.POE_API_KEY,
   mistral: process.env.MISTRAL_API_KEY,
-  balldontlie: process.env.BALLDONTLIE_API_KEY
+  balldontlie: process.env.BALLDONTLIE_API_KEY,
+  yahoo: {
+    clientId: process.env.YAHOO_CLIENT_ID,
+    clientSecret: process.env.YAHOO_CLIENT_SECRET
+  }
 };
 
 // Health check
 app.get('/', (req, res) => {
   res.json({ 
     status: 'ok', 
-    service: 'SBA GENIUS Proxy v2.2',
-    endpoints: ['/grok', '/odds-api', '/youcom', '/betburger', '/balldontlie'],
+    service: 'SBA GENIUS Proxy v2.3',
+    endpoints: ['/grok', '/odds-api', '/youcom', '/betburger', '/balldontlie', '/yahoo'],
     keysConfigured: {
       grok: !!API_KEYS.grok,
       oddsApi: !!API_KEYS.oddsApi,
@@ -36,7 +40,8 @@ app.get('/', (req, res) => {
       betburger: !!API_KEYS.betburger,
       poe: !!API_KEYS.poe,
       mistral: !!API_KEYS.mistral,
-      balldontlie: !!API_KEYS.balldontlie
+      balldontlie: !!API_KEYS.balldontlie,
+      yahoo: !!(API_KEYS.yahoo.clientId && API_KEYS.yahoo.clientSecret)
     }
   });
 });
@@ -309,6 +314,85 @@ app.post('/balldontlie', async (req, res) => {
 });
 
 // ═══════════════════════════════════════════════════════════════════════════
+// YAHOO FANTASY/DFS API
+// ═══════════════════════════════════════════════════════════════════════════
+app.post('/yahoo', async (req, res) => {
+  try {
+    const { player, sport, clientId, clientSecret } = req.body;
+    const cId = clientId || API_KEYS.yahoo.clientId;
+    const cSecret = clientSecret || API_KEYS.yahoo.clientSecret;
+    
+    console.log('Yahoo DFS request for:', player, sport);
+    
+    if (!cId || !cSecret) {
+      return res.status(400).json({ 
+        error: 'Yahoo credentials not configured',
+        note: 'Add YAHOO_CLIENT_ID and YAHOO_CLIENT_SECRET to Render env vars'
+      });
+    }
+    
+    // Yahoo Fantasy API requires OAuth 2.0 flow
+    // For now, return configuration status
+    // Full OAuth would require user authorization
+    
+    // Try to get a token using client credentials
+    const authString = Buffer.from(`${cId}:${cSecret}`).toString('base64');
+    
+    const tokenResponse = await fetch('https://api.login.yahoo.com/oauth2/get_token', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Basic ${authString}`,
+        'Content-Type': 'application/x-www-form-urlencoded'
+      },
+      body: 'grant_type=client_credentials'
+    });
+    
+    if (tokenResponse.ok) {
+      const tokenData = await tokenResponse.json();
+      console.log('Yahoo token obtained');
+      
+      // Try to fetch player data
+      const sportKey = {
+        'NBA': 'nba',
+        'NFL': 'nfl', 
+        'MLB': 'mlb',
+        'NHL': 'nhl'
+      }[sport?.toUpperCase()] || 'nba';
+      
+      // Yahoo Fantasy API endpoint
+      const fantasyUrl = `https://fantasysports.yahooapis.com/fantasy/v2/league/${sportKey}.l.auto/players;search=${encodeURIComponent(player)}?format=json`;
+      
+      const fantasyResponse = await fetch(fantasyUrl, {
+        headers: {
+          'Authorization': `Bearer ${tokenData.access_token}`
+        }
+      });
+      
+      if (fantasyResponse.ok) {
+        const fantasyData = await fantasyResponse.json();
+        return res.json({
+          found: true,
+          data: fantasyData,
+          source: 'yahoo_fantasy'
+        });
+      }
+    }
+    
+    // OAuth flow required for full access
+    res.json({
+      configured: true,
+      status: 'oauth_required',
+      message: 'Yahoo Fantasy requires user OAuth authorization for full data access',
+      note: 'Credentials are configured but user auth flow needed'
+    });
+    
+  } catch (error) {
+    console.error('Yahoo error:', error.message);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
 // TEST ENDPOINTS
 // ═══════════════════════════════════════════════════════════════════════════
 app.get('/test/youcom', async (req, res) => {
@@ -373,6 +457,44 @@ app.get('/test/balldontlie', async (req, res) => {
       status, 
       hasData: !!data?.data?.length,
       playerFound: data?.data?.[0]?.first_name + ' ' + data?.data?.[0]?.last_name
+    });
+  } catch (error) {
+    res.json({ error: error.message });
+  }
+});
+
+app.get('/test/yahoo', async (req, res) => {
+  try {
+    const cId = API_KEYS.yahoo.clientId;
+    const cSecret = API_KEYS.yahoo.clientSecret;
+    
+    if (!cId || !cSecret) {
+      return res.json({ 
+        error: 'Yahoo credentials not set',
+        note: 'Add YAHOO_CLIENT_ID and YAHOO_CLIENT_SECRET to Render env vars'
+      });
+    }
+    
+    // Test OAuth token request
+    const authString = Buffer.from(`${cId}:${cSecret}`).toString('base64');
+    
+    const response = await fetch('https://api.login.yahoo.com/oauth2/get_token', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Basic ${authString}`,
+        'Content-Type': 'application/x-www-form-urlencoded'
+      },
+      body: 'grant_type=client_credentials'
+    });
+    
+    const status = response.status;
+    const data = await response.json().catch(() => response.text());
+    
+    res.json({
+      status,
+      configured: true,
+      tokenObtained: !!data?.access_token,
+      note: data?.access_token ? 'Token works!' : 'May need user OAuth flow'
     });
   } catch (error) {
     res.json({ error: error.message });
