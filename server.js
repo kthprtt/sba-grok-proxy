@@ -1,349 +1,218 @@
-// ═══════════════════════════════════════════════════════════════════════════
-// 🏆 SBA GENIUS - GROK PROXY SERVER (SOCIAL PULSE™)
-// ═══════════════════════════════════════════════════════════════════════════
-// Deploy to Railway or Render to bypass CORS restrictions
-// ═══════════════════════════════════════════════════════════════════════════
+// SBA GENIUS PROXY SERVER v2.0
+// Handles CORS for all external APIs
+// Deploy to Render.com
 
 const express = require('express');
 const cors = require('cors');
 const fetch = require('node-fetch');
 
 const app = express();
+app.use(cors());
+app.use(express.json());
+
 const PORT = process.env.PORT || 3000;
 
-// Enable CORS for all origins (or restrict to your domain)
-app.use(cors({
-  origin: '*',
-  methods: ['GET', 'POST', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-API-Key']
-}));
-
-app.use(express.json());
+// API Keys from environment variables
+const API_KEYS = {
+  grok: process.env.GROK_API_KEY,
+  oddsApi: process.env.ODDS_API_KEY,
+  youcom: process.env.YOUCOM_API_KEY,
+  betburger: process.env.BETBURGER_API_KEY,
+  poe: process.env.POE_API_KEY,
+  mistral: process.env.MISTRAL_API_KEY
+};
 
 // Health check
 app.get('/', (req, res) => {
   res.json({ 
     status: 'ok', 
-    service: 'SBA GENIUS - SOCIAL PULSE™ Proxy',
-    version: '1.0.0',
-    endpoints: ['/grok', '/odds', '/espn']
+    service: 'SBA GENIUS Proxy v2.0',
+    endpoints: ['/grok', '/odds-api', '/youcom', '/betburger', '/balldontlie'],
+    keysConfigured: {
+      grok: !!API_KEYS.grok,
+      oddsApi: !!API_KEYS.oddsApi,
+      youcom: !!API_KEYS.youcom,
+      betburger: !!API_KEYS.betburger,
+      poe: !!API_KEYS.poe,
+      mistral: !!API_KEYS.mistral
+    }
   });
 });
 
-// ═══════════════════════════════════════════════════════════════════════════
-// GROK (xAI) PROXY - SOCIAL PULSE™
-// ═══════════════════════════════════════════════════════════════════════════
-
-const GROK_API_KEY = process.env.GROK_API_KEY || ''; // Set in environment variables
-
+// GROK (xAI)
 app.post('/grok', async (req, res) => {
   try {
-    console.log('📱 SOCIAL PULSE™ request received');
+    const { model, messages, max_tokens } = req.body;
+    const apiKey = req.headers.authorization?.replace('Bearer ', '') || API_KEYS.grok;
+    
+    if (!apiKey) {
+      return res.status(400).json({ error: 'No API key provided' });
+    }
     
     const response = await fetch('https://api.x.ai/v1/chat/completions', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${GROK_API_KEY}`
+        'Authorization': `Bearer ${apiKey}`
       },
-      body: JSON.stringify(req.body)
+      body: JSON.stringify({ model, messages, max_tokens })
     });
     
     const data = await response.json();
+    res.json(data);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// THE ODDS API
+app.post('/odds-api', async (req, res) => {
+  try {
+    const { sport, apiKey, regions = 'us', markets = 'h2h,spreads,totals' } = req.body;
+    const key = apiKey || API_KEYS.oddsApi;
+    
+    if (!key) {
+      return res.status(400).json({ error: 'No API key provided' });
+    }
+    
+    const url = `https://api.the-odds-api.com/v4/sports/${sport}/odds/?apiKey=${key}&regions=${regions}&markets=${markets}&oddsFormat=american`;
+    const response = await fetch(url);
     
     if (!response.ok) {
-      console.error('❌ Grok API error:', data);
-      return res.status(response.status).json(data);
+      throw new Error(`Odds API returned ${response.status}`);
     }
     
-    console.log('✅ SOCIAL PULSE™ response sent');
-    res.json(data);
-    
-  } catch (error) {
-    console.error('❌ Proxy error:', error.message);
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// ═══════════════════════════════════════════════════════════════════════════
-// THE ODDS API PROXY - MARKET CONSENSUS™
-// ═══════════════════════════════════════════════════════════════════════════
-
-const ODDS_API_KEY = process.env.ODDS_API_KEY || ''; // Set in environment variables
-
-app.get('/odds/:sport', async (req, res) => {
-  try {
-    const { sport } = req.params;
-    const { markets, bookmakers } = req.query;
-    
-    console.log(`💹 MARKET CONSENSUS™ request for ${sport}`);
-    
-    const url = `https://api.the-odds-api.com/v4/sports/${sport}/odds/?apiKey=${ODDS_API_KEY}&regions=us&markets=${markets || 'h2h,spreads,totals'}&oddsFormat=american`;
-    
-    const response = await fetch(url);
     const data = await response.json();
-    
-    if (!response.ok) {
-      console.error('❌ Odds API error:', data);
-      return res.status(response.status).json(data);
-    }
-    
-    console.log(`✅ MARKET CONSENSUS™: ${data.length} events found`);
     res.json(data);
-    
-  } catch (error) {
-    console.error('❌ Proxy error:', error.message);
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// Player props endpoint
-app.get('/odds/:sport/props/:eventId', async (req, res) => {
-  try {
-    const { sport, eventId } = req.params;
-    const { markets } = req.query;
-    
-    console.log(`💹 MARKET CONSENSUS™ props request for event ${eventId}`);
-    
-    const url = `https://api.the-odds-api.com/v4/sports/${sport}/events/${eventId}/odds?apiKey=${ODDS_API_KEY}&regions=us&markets=${markets || 'player_points,player_rebounds,player_assists'}&oddsFormat=american`;
-    
-    const response = await fetch(url);
-    const data = await response.json();
-    
-    if (!response.ok) {
-      return res.status(response.status).json(data);
-    }
-    
-    res.json(data);
-    
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
 });
 
-// ═══════════════════════════════════════════════════════════════════════════
-// ESPN API PROXY - LIVE FEED™
-// ═══════════════════════════════════════════════════════════════════════════
-
-app.get('/espn/:sport/scoreboard', async (req, res) => {
+// YOU.COM SEARCH API
+app.post('/youcom', async (req, res) => {
   try {
-    const { sport } = req.params;
+    const { query, apiKey } = req.body;
+    const key = apiKey || API_KEYS.youcom;
     
-    const sportMap = {
-      nba: 'basketball/nba',
-      nfl: 'football/nfl',
-      mlb: 'baseball/mlb',
-      nhl: 'hockey/nhl',
-      ncaab: 'basketball/mens-college-basketball',
-      ncaaf: 'football/college-football'
-    };
-    
-    const espnSport = sportMap[sport.toLowerCase()] || sport;
-    console.log(`📊 LIVE FEED™ request for ${espnSport}`);
-    
-    const url = `https://site.api.espn.com/apis/site/v2/sports/${espnSport}/scoreboard`;
-    
-    const response = await fetch(url);
-    const data = await response.json();
-    
-    console.log(`✅ LIVE FEED™: ${data.events?.length || 0} games found`);
-    res.json(data);
-    
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// ESPN Player stats
-app.get('/espn/player/:playerId', async (req, res) => {
-  try {
-    const { playerId } = req.params;
-    const { sport } = req.query;
-    
-    const sportMap = {
-      nba: 'basketball/nba',
-      nfl: 'football/nfl',
-      mlb: 'baseball/mlb'
-    };
-    
-    const espnSport = sportMap[sport?.toLowerCase()] || 'basketball/nba';
-    
-    const url = `https://site.api.espn.com/apis/common/v3/sports/${espnSport}/athletes/${playerId}`;
-    
-    const response = await fetch(url);
-    const data = await response.json();
-    
-    res.json(data);
-    
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// ═══════════════════════════════════════════════════════════════════════════
-// REVERSE LINE MOVEMENT (RLM) DETECTOR
-// ═══════════════════════════════════════════════════════════════════════════
-
-app.post('/rlm/detect', async (req, res) => {
-  try {
-    const { openingLine, currentLine, publicMoneyPercent, side } = req.body;
-    
-    console.log('🔄 RLM Detection request');
-    
-    // RLM = Line moves OPPOSITE to where public money is going
-    const lineMoved = currentLine - openingLine;
-    const publicOnOver = side === 'over' ? publicMoneyPercent : (100 - publicMoneyPercent);
-    
-    let rlmDetected = false;
-    let rlmStrength = 'none';
-    let signal = 'neutral';
-    
-    // Public heavy on OVER but line DROPPED
-    if (publicOnOver > 60 && lineMoved < -0.5) {
-      rlmDetected = true;
-      rlmStrength = lineMoved < -1.5 ? 'strong' : 'moderate';
-      signal = 'sharp_under';
-    }
-    // Public heavy on UNDER but line ROSE
-    else if (publicOnOver < 40 && lineMoved > 0.5) {
-      rlmDetected = true;
-      rlmStrength = lineMoved > 1.5 ? 'strong' : 'moderate';
-      signal = 'sharp_over';
+    if (!key) {
+      return res.status(400).json({ error: 'No API key provided' });
     }
     
-    const result = {
-      rlmDetected,
-      rlmStrength,
-      signal,
-      analysis: {
-        openingLine,
-        currentLine,
-        lineMoved: lineMoved.toFixed(1),
-        publicMoneyPercent,
-        publicSide: publicOnOver > 50 ? 'over' : 'under'
+    let response = await fetch('https://api.ydc-index.io/search', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-API-Key': key
       },
-      recommendation: rlmDetected 
-        ? `⚠️ RLM DETECTED: Sharp money appears to be on the ${signal === 'sharp_over' ? 'OVER' : 'UNDER'}. Line moved ${Math.abs(lineMoved).toFixed(1)} points AGAINST ${publicOnOver > 50 ? 'public' : 'sharp'} money.`
-        : 'No reverse line movement detected.'
-    };
+      body: JSON.stringify({ query, num_web_results: 5 })
+    });
     
-    console.log('✅ RLM result:', result);
-    res.json(result);
-    
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// ═══════════════════════════════════════════════════════════════════════════
-// HISTORICAL TRACKING ENDPOINT
-// ═══════════════════════════════════════════════════════════════════════════
-
-// In-memory storage (use Redis/DB in production)
-const predictions = [];
-
-app.post('/track/prediction', (req, res) => {
-  try {
-    const prediction = {
-      id: Date.now().toString(),
-      timestamp: new Date().toISOString(),
-      ...req.body,
-      result: null // Will be updated later
-    };
-    
-    predictions.push(prediction);
-    console.log(`📊 Tracked prediction ${prediction.id}`);
-    
-    res.json({ success: true, id: prediction.id });
-    
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
-app.post('/track/result', (req, res) => {
-  try {
-    const { id, actualResult, hit } = req.body;
-    
-    const prediction = predictions.find(p => p.id === id);
-    if (prediction) {
-      prediction.result = actualResult;
-      prediction.hit = hit;
-      prediction.settledAt = new Date().toISOString();
-      console.log(`✅ Updated prediction ${id}: ${hit ? 'HIT' : 'MISS'}`);
+    if (!response.ok) {
+      response = await fetch(`https://api.ydc-index.io/rag?query=${encodeURIComponent(query)}`, {
+        method: 'GET',
+        headers: { 'X-API-Key': key }
+      });
     }
     
-    res.json({ success: true });
+    if (!response.ok) {
+      throw new Error(`You.com API returned ${response.status}`);
+    }
     
+    const data = await response.json();
+    res.json(data);
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
 });
 
-app.get('/track/stats', (req, res) => {
+// BETBURGER API
+app.post('/betburger', async (req, res) => {
   try {
-    const settled = predictions.filter(p => p.result !== null);
-    const hits = settled.filter(p => p.hit);
+    const { endpoint = 'valuebets', accessToken, sport, perPage = 50 } = req.body;
+    const key = accessToken || API_KEYS.betburger;
     
-    const stats = {
-      total: predictions.length,
-      settled: settled.length,
-      pending: predictions.length - settled.length,
-      hits: hits.length,
-      misses: settled.length - hits.length,
-      hitRate: settled.length > 0 ? ((hits.length / settled.length) * 100).toFixed(1) + '%' : 'N/A',
-      bySport: {},
-      byTier: {},
-      byEdgeRange: {}
-    };
+    if (!key) {
+      return res.status(400).json({ error: 'No API key provided' });
+    }
     
-    // Group by sport
-    settled.forEach(p => {
-      const sport = p.sport || 'unknown';
-      if (!stats.bySport[sport]) {
-        stats.bySport[sport] = { total: 0, hits: 0 };
-      }
-      stats.bySport[sport].total++;
-      if (p.hit) stats.bySport[sport].hits++;
+    const url = `https://api.betburger.com/api/v1/${endpoint}?access_token=${key}&sport=${sport}&per_page=${perPage}`;
+    const response = await fetch(url, {
+      method: 'GET',
+      headers: { 'Accept': 'application/json' }
     });
     
-    // Group by tier
-    settled.forEach(p => {
-      const tier = p.tier || 'unknown';
-      if (!stats.byTier[tier]) {
-        stats.byTier[tier] = { total: 0, hits: 0 };
+    if (!response.ok) {
+      if (endpoint === 'valuebets') {
+        const arbUrl = `https://api.betburger.com/api/v1/arbs?access_token=${key}&sport=${sport}&per_page=30`;
+        const arbResponse = await fetch(arbUrl, { headers: { 'Accept': 'application/json' } });
+        
+        if (arbResponse.ok) {
+          const data = await arbResponse.json();
+          return res.json(data);
+        }
       }
-      stats.byTier[tier].total++;
-      if (p.hit) stats.byTier[tier].hits++;
-    });
+      throw new Error(`BetBurger API returned ${response.status}`);
+    }
     
-    res.json(stats);
-    
+    const data = await response.json();
+    res.json(data);
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
 });
 
-// ═══════════════════════════════════════════════════════════════════════════
-// START SERVER
-// ═══════════════════════════════════════════════════════════════════════════
+// BALLDONTLIE API (NBA Stats)
+app.post('/balldontlie', async (req, res) => {
+  try {
+    const { player } = req.body;
+    
+    const searchUrl = `https://www.balldontlie.io/api/v1/players?search=${encodeURIComponent(player)}`;
+    const searchResponse = await fetch(searchUrl);
+    const searchData = await searchResponse.json();
+    
+    if (!searchData.data || searchData.data.length === 0) {
+      return res.json({ found: false });
+    }
+    
+    const playerData = searchData.data[0];
+    
+    const statsUrl = `https://www.balldontlie.io/api/v1/season_averages?player_ids[]=${playerData.id}`;
+    const statsResponse = await fetch(statsUrl);
+    const statsData = await statsResponse.json();
+    const stats = statsData.data?.[0];
+    
+    res.json({
+      found: true,
+      player: playerData,
+      seasonAvg: stats?.pts?.toFixed(1),
+      reb: stats?.reb?.toFixed(1),
+      ast: stats?.ast?.toFixed(1),
+      gamesPlayed: stats?.games_played
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// GENERIC PROXY
+app.post('/proxy', async (req, res) => {
+  try {
+    const { url, method = 'GET', headers = {}, body } = req.body;
+    
+    const response = await fetch(url, {
+      method,
+      headers,
+      body: body ? JSON.stringify(body) : undefined
+    });
+    
+    const data = await response.json();
+    res.json(data);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
 
 app.listen(PORT, () => {
-  console.log(`
-╔═══════════════════════════════════════════════════════════════════════╗
-║  🏆 SBA GENIUS PROXY SERVER - RUNNING                                ║
-╠═══════════════════════════════════════════════════════════════════════╣
-║  Port: ${PORT}                                                           ║
-║                                                                       ║
-║  Endpoints:                                                           ║
-║  • POST /grok           - SOCIAL PULSE™ (Twitter sentiment)          ║
-║  • GET  /odds/:sport    - MARKET CONSENSUS™ (multi-book odds)        ║
-║  • GET  /espn/:sport    - LIVE FEED™ (real-time stats)              ║
-║  • POST /rlm/detect     - Reverse Line Movement detector             ║
-║  • POST /track/prediction - Historical tracking                       ║
-║  • GET  /track/stats    - Performance statistics                      ║
-╚═══════════════════════════════════════════════════════════════════════╝
-  `);
+  console.log(`SBA GENIUS Proxy v2.0 running on port ${PORT}`);
 });
-
-module.exports = app;
