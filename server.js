@@ -317,22 +317,15 @@ app.post('/balldontlie', async (req, res) => {
     
     if (!key) return res.status(400).json({ error: 'No API key', note: 'Add BALLDONTLIE_API_KEY' });
     
-    console.log('BallDontLie search for:', player);
+    // Use last name for search (works better with API)
+    const searchTerm = player.includes(' ') ? player.split(' ').pop() : player;
+    console.log('BallDontLie search for:', searchTerm, '(from:', player, ')');
     
-    // Search for player - try both v1 and nba/v1 paths
-    let searchUrl = `https://api.balldontlie.io/v1/players?search=${encodeURIComponent(player)}`;
-    let searchResponse = await fetch(searchUrl, {
+    // Search for player
+    const searchUrl = `https://api.balldontlie.io/v1/players?search=${encodeURIComponent(searchTerm)}`;
+    const searchResponse = await fetch(searchUrl, {
       headers: { 'Authorization': key }
     });
-    
-    // If v1 fails, try nba/v1
-    if (!searchResponse.ok) {
-      console.log('v1 failed, trying nba/v1...');
-      searchUrl = `https://api.balldontlie.io/nba/v1/players?search=${encodeURIComponent(player)}`;
-      searchResponse = await fetch(searchUrl, {
-        headers: { 'Authorization': key }
-      });
-    }
     
     console.log('BallDontLie status:', searchResponse.status);
     
@@ -349,7 +342,16 @@ app.post('/balldontlie', async (req, res) => {
       return res.json({ found: false, note: 'Player not found', searchedFor: player });
     }
     
-    const playerData = searchData.data[0];
+    // If full name provided, try to match both first and last name
+    let playerData = searchData.data[0];
+    if (player.includes(' ')) {
+      const nameParts = player.toLowerCase().split(' ');
+      const match = searchData.data.find(p => 
+        nameParts.includes(p.first_name?.toLowerCase()) && 
+        nameParts.includes(p.last_name?.toLowerCase())
+      );
+      if (match) playerData = match;
+    }
     
     // Try to get season averages
     let stats = null;
