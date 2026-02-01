@@ -312,12 +312,13 @@ app.post('/youcom', async (req, res) => {
 // BALLDONTLIE
 app.post('/balldontlie', async (req, res) => {
   try {
-    const { player, apiKey } = req.body;
+    const { player, apiKey, season = 2024 } = req.body;
     const key = apiKey || API_KEYS.balldontlie;
     
     if (!key) return res.status(400).json({ error: 'No API key', note: 'Add BALLDONTLIE_API_KEY' });
     
-    const searchUrl = `https://api.balldontlie.io/v1/players?search=${encodeURIComponent(player)}`;
+    // New API uses /nba/v1/ path
+    const searchUrl = `https://api.balldontlie.io/nba/v1/players?search=${encodeURIComponent(player)}`;
     const searchResponse = await fetch(searchUrl, {
       headers: { 'Authorization': key }
     });
@@ -327,13 +328,13 @@ app.post('/balldontlie', async (req, res) => {
     const searchData = await searchResponse.json();
     
     if (!searchData.data || searchData.data.length === 0) {
-      return res.json({ found: false });
+      return res.json({ found: false, note: 'Player not found' });
     }
     
     const playerData = searchData.data[0];
     
-    // Get season averages
-    const statsUrl = `https://api.balldontlie.io/v1/season_averages?player_id=${playerData.id}`;
+    // Get season averages with season parameter
+    const statsUrl = `https://api.balldontlie.io/nba/v1/season_averages?season=${season}&player_id=${playerData.id}`;
     const statsResponse = await fetch(statsUrl, {
       headers: { 'Authorization': key }
     });
@@ -345,6 +346,7 @@ app.post('/balldontlie', async (req, res) => {
       return res.json({
         found: true,
         player: playerData,
+        season: season,
         seasonAvg: stats?.pts?.toFixed(1) || null,
         reb: stats?.reb?.toFixed(1) || null,
         ast: stats?.ast?.toFixed(1) || null,
@@ -406,7 +408,7 @@ app.get('/test/balldontlie', async (req, res) => {
     const key = API_KEYS.balldontlie;
     if (!key) return res.json({ error: 'No BALLDONTLIE_API_KEY set' });
     
-    const url = `https://api.balldontlie.io/v1/players?search=LeBron`;
+    const url = `https://api.balldontlie.io/nba/v1/players?search=LeBron`;
     const response = await fetch(url, { headers: { 'Authorization': key } });
     const data = await response.json().catch(() => response.text());
     
