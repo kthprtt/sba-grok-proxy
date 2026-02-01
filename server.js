@@ -309,7 +309,7 @@ app.post('/youcom', async (req, res) => {
   }
 });
 
-// BALLDONTLIE
+// BALLDONTLIE - Player Search + Stats
 app.post('/balldontlie', async (req, res) => {
   try {
     const { player, apiKey, season = 2024 } = req.body;
@@ -382,6 +382,177 @@ app.post('/balldontlie', async (req, res) => {
   } catch (error) {
     console.error('BallDontLie error:', error.message);
     res.status(500).json({ error: error.message });
+  }
+});
+
+// BALLDONTLIE - Game Stats (L10 for hit rate) - ALL-STAR PLAN
+app.post('/balldontlie/games', async (req, res) => {
+  try {
+    const { playerId, player, season = 2024, limit = 10, apiKey } = req.body;
+    const key = apiKey || API_KEYS.balldontlie;
+    
+    if (!key) return res.status(400).json({ error: 'No API key' });
+    
+    let pid = playerId;
+    
+    // If no playerId, search for player first
+    if (!pid && player) {
+      const searchTerm = player.includes(' ') ? player.split(' ').pop() : player;
+      const searchUrl = `https://api.balldontlie.io/v1/players?search=${encodeURIComponent(searchTerm)}`;
+      const searchResponse = await fetch(searchUrl, { headers: { 'Authorization': key } });
+      const searchData = await searchResponse.json();
+      
+      if (searchData.data?.length > 0) {
+        // Match full name if provided
+        if (player.includes(' ')) {
+          const nameParts = player.toLowerCase().split(' ');
+          const match = searchData.data.find(p => 
+            nameParts.includes(p.first_name?.toLowerCase()) && 
+            nameParts.includes(p.last_name?.toLowerCase())
+          );
+          pid = match?.id || searchData.data[0].id;
+        } else {
+          pid = searchData.data[0].id;
+        }
+      }
+    }
+    
+    if (!pid) {
+      return res.json({ error: 'Player not found', games: [] });
+    }
+    
+    console.log('Fetching game stats for player ID:', pid);
+    
+    // Get recent game stats - ALL-STAR endpoint
+    const gamesUrl = `https://api.balldontlie.io/v1/stats?player_ids[]=${pid}&seasons[]=${season}&per_page=${limit}`;
+    const gamesResponse = await fetch(gamesUrl, {
+      headers: { 'Authorization': key }
+    });
+    
+    if (!gamesResponse.ok) {
+      const errorText = await gamesResponse.text();
+      console.error('Game stats error:', errorText);
+      throw new Error(`HTTP ${gamesResponse.status}`);
+    }
+    
+    const gamesData = await gamesResponse.json();
+    console.log('Game stats found:', gamesData.data?.length || 0);
+    
+    // Format game stats
+    const games = (gamesData.data || []).map(g => ({
+      gameId: g.game?.id,
+      date: g.game?.date,
+      opponent: g.game?.home_team_id === g.team?.id ? 
+        `vs ${g.game?.visitor_team_id}` : `@ ${g.game?.home_team_id}`,
+      min: g.min,
+      pts: g.pts,
+      reb: g.reb,
+      ast: g.ast,
+      stl: g.stl,
+      blk: g.blk,
+      fg_pct: g.fg_pct,
+      fg3m: g.fg3m,
+      turnover: g.turnover
+    }));
+    
+    // Calculate averages from these games
+    const avgPts = games.length > 0 ? (games.reduce((s, g) => s + (g.pts || 0), 0) / games.length).toFixed(1) : null;
+    const avgReb = games.length > 0 ? (games.reduce((s, g) => s + (g.reb || 0), 0) / games.length).toFixed(1) : null;
+    const avgAst = games.length > 0 ? (games.reduce((s, g) => s + (g.ast || 0), 0) / games.length).toFixed(1) : null;
+    
+    res.json({
+      playerId: pid,
+      season,
+      gamesFound: games.length,
+      games,
+      averages: {
+        pts: avgPts,
+        reb: avgReb,
+        ast: avgAst
+      }
+    });
+    
+  } catch (error) {
+    console.error('Game stats error:', error.message);
+    res.status(500).json({ error: error.message, games: [] });
+  }
+});
+
+// BALLDONTLIE - Player Injuries - ALL-STAR PLAN
+app.post('/balldontlie/injuries', async (req, res) => {
+  try {
+    const { playerId, player, apiKey } = req.body;
+    const key = apiKey || API_KEYS.balldontlie;
+    
+    if (!key) return res.status(400).json({ error: 'No API key' });
+    
+    let pid = playerId;
+    
+    // If no playerId, search for player first
+    if (!pid && player) {
+      const searchTerm = player.includes(' ') ? player.split(' ').pop() : player;
+      const searchUrl = `https://api.balldontlie.io/v1/players?search=${encodeURIComponent(searchTerm)}`;
+      const searchResponse = await fetch(searchUrl, { headers: { 'Authorization': key } });
+      const searchData = await searchResponse.json();
+      
+      if (searchData.data?.length > 0) {
+        if (player.includes(' ')) {
+          const nameParts = player.toLowerCase().split(' ');
+          const match = searchData.data.find(p => 
+            nameParts.includes(p.first_name?.toLowerCase()) && 
+            nameParts.includes(p.last_name?.toLowerCase())
+          );
+          pid = match?.id || searchData.data[0].id;
+        } else {
+          pid = searchData.data[0].id;
+        }
+      }
+    }
+    
+    if (!pid) {
+      return res.json({ error: 'Player not found', injuries: [] });
+    }
+    
+    // Get injury status - ALL-STAR endpoint
+    const injuryUrl = `https://api.balldontlie.io/v1/player_injuries?player_ids[]=${pid}`;
+    const injuryResponse = await fetch(injuryUrl, {
+      headers: { 'Authorization': key }
+    });
+    
+    if (!injuryResponse.ok) {
+      // May not have injury data
+      return res.json({ playerId: pid, injuries: [], status: 'healthy' });
+    }
+    
+    const injuryData = await injuryResponse.json();
+    
+    const injuries = (injuryData.data || []).map(inj => ({
+      status: inj.status,
+      description: inj.description,
+      date: inj.date,
+      returnDate: inj.return_date
+    }));
+    
+    // Determine overall status
+    let status = 'healthy';
+    if (injuries.length > 0) {
+      const latestStatus = injuries[0]?.status?.toLowerCase() || '';
+      if (latestStatus.includes('out')) status = 'out';
+      else if (latestStatus.includes('doubtful')) status = 'doubtful';
+      else if (latestStatus.includes('questionable')) status = 'questionable';
+      else if (latestStatus.includes('probable')) status = 'probable';
+    }
+    
+    res.json({
+      playerId: pid,
+      injuries,
+      status,
+      isHealthy: status === 'healthy' || status === 'probable'
+    });
+    
+  } catch (error) {
+    console.error('Injuries error:', error.message);
+    res.status(500).json({ error: error.message, injuries: [] });
   }
 });
 
