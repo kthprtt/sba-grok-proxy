@@ -123,7 +123,7 @@ app.post('/deepseek', async (req, res) => {
 // COHERE
 app.post('/cohere', async (req, res) => {
   try {
-    const { model = 'command-r', message, chat_history = [], apiKey } = req.body;
+    const { model = 'command-a-03-2025', message, chat_history = [], apiKey } = req.body;
     const key = apiKey || API_KEYS.cohere;
     
     if (!key) return res.status(400).json({ error: 'No API key' });
