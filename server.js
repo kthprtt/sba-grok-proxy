@@ -103,7 +103,7 @@ app.post('/odds-api', async (req, res) => {
 });
 
 // ═══════════════════════════════════════════════════════════════════════════
-// YOU.COM SEARCH API - FIXED: Uses GET with /v1/search
+// YOU.COM SEARCH API - FIXED URL: ydc-index.io (not api.ydc-index.io)
 // ═══════════════════════════════════════════════════════════════════════════
 app.post('/youcom', async (req, res) => {
   try {
@@ -116,13 +116,14 @@ app.post('/youcom', async (req, res) => {
     
     console.log('You.com request for:', query);
     
-    // CORRECT: Use GET request with /v1/search endpoint
-    const url = `https://api.ydc-index.io/v1/search?query=${encodeURIComponent(query)}`;
+    // CORRECT URL: ydc-index.io (NOT api.ydc-index.io)
+    const url = `https://ydc-index.io/v1/search?query=${encodeURIComponent(query)}&language=EN`;
     
     const response = await fetch(url, {
       method: 'GET',
       headers: {
-        'X-API-Key': key
+        'Accept': 'application/json',
+        'X-API-KEY': key
       }
     });
     
@@ -135,7 +136,7 @@ app.post('/youcom', async (req, res) => {
     }
     
     const data = await response.json();
-    console.log('You.com success, results:', data.results?.web?.length || 0);
+    console.log('You.com success, web results:', data.results?.web?.length || 0);
     
     // Transform to expected format
     res.json({
@@ -400,10 +401,14 @@ app.get('/test/youcom', async (req, res) => {
     const key = API_KEYS.youcom;
     if (!key) return res.json({ error: 'No YOUCOM_API_KEY set' });
     
-    const url = `https://api.ydc-index.io/v1/search?query=${encodeURIComponent('NBA basketball news')}`;
+    // CORRECT URL: ydc-index.io (NOT api.ydc-index.io)
+    const url = `https://ydc-index.io/v1/search?query=${encodeURIComponent('NBA basketball news')}&language=EN`;
     const response = await fetch(url, {
       method: 'GET',
-      headers: { 'X-API-Key': key }
+      headers: { 
+        'Accept': 'application/json',
+        'X-API-KEY': key 
+      }
     });
     
     const status = response.status;
