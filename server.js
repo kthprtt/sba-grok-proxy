@@ -1,5 +1,5 @@
-// SBA GENIUS PROXY SERVER v2.1
-// Handles CORS for all external APIs
+// SBA GENIUS PROXY SERVER v2.2
+// FIXED: Correct API endpoints for You.com and BetBurger
 // Deploy to Render.com
 
 const express = require('express');
@@ -27,7 +27,7 @@ const API_KEYS = {
 app.get('/', (req, res) => {
   res.json({ 
     status: 'ok', 
-    service: 'SBA GENIUS Proxy v2.1',
+    service: 'SBA GENIUS Proxy v2.2',
     endpoints: ['/grok', '/odds-api', '/youcom', '/betburger', '/balldontlie'],
     keysConfigured: {
       grok: !!API_KEYS.grok,
@@ -98,7 +98,7 @@ app.post('/odds-api', async (req, res) => {
 });
 
 // ═══════════════════════════════════════════════════════════════════════════
-// YOU.COM SEARCH API - Updated endpoints
+// YOU.COM SEARCH API - FIXED: Uses GET with /v1/search
 // ═══════════════════════════════════════════════════════════════════════════
 app.post('/youcom', async (req, res) => {
   try {
@@ -111,73 +111,34 @@ app.post('/youcom', async (req, res) => {
     
     console.log('You.com request for:', query);
     
-    // Try the news endpoint first (most reliable)
-    let response = await fetch('https://api.ydc-index.io/news', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-API-Key': key
-      },
-      body: JSON.stringify({ 
-        q: query,
-        count: 5
-      })
-    });
+    // CORRECT: Use GET request with /v1/search endpoint
+    const url = `https://api.ydc-index.io/v1/search?query=${encodeURIComponent(query)}`;
     
-    if (response.ok) {
-      const data = await response.json();
-      console.log('You.com news success');
-      return res.json({
-        source: 'news',
-        hits: data.news?.results || [],
-        snippets: data.news?.results?.map(r => r.description) || []
-      });
-    }
-    
-    // Try search endpoint
-    response = await fetch('https://api.ydc-index.io/search', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-API-Key': key
-      },
-      body: JSON.stringify({ 
-        query: query,
-        num_web_results: 5
-      })
-    });
-    
-    if (response.ok) {
-      const data = await response.json();
-      console.log('You.com search success');
-      return res.json({
-        source: 'search',
-        hits: data.hits || [],
-        snippets: data.hits?.map(h => h.snippet) || []
-      });
-    }
-    
-    // Try RAG endpoint as last resort
-    response = await fetch(`https://api.ydc-index.io/rag?query=${encodeURIComponent(query)}`, {
+    const response = await fetch(url, {
       method: 'GET',
-      headers: { 'X-API-Key': key }
+      headers: {
+        'X-API-Key': key
+      }
     });
     
-    if (response.ok) {
-      const data = await response.json();
-      console.log('You.com RAG success');
-      return res.json({
-        source: 'rag',
-        answer: data.answer || '',
-        hits: data.hits || [],
-        snippets: data.hits?.map(h => h.snippet) || []
-      });
+    console.log('You.com response status:', response.status);
+    
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error('You.com error:', response.status, errorText);
+      throw new Error(`You.com API returned ${response.status}: ${errorText.substring(0, 100)}`);
     }
     
-    // All endpoints failed
-    const errorText = await response.text();
-    console.error('You.com all endpoints failed:', response.status, errorText);
-    throw new Error(`You.com API returned ${response.status}: ${errorText}`);
+    const data = await response.json();
+    console.log('You.com success, results:', data.results?.web?.length || 0);
+    
+    // Transform to expected format
+    res.json({
+      hits: data.results?.web || [],
+      news: data.results?.news || [],
+      snippets: data.results?.web?.map(r => r.snippets?.[0] || r.description) || [],
+      sources: data.results?.web?.map(r => r.title) || []
+    });
     
   } catch (error) {
     console.error('You.com error:', error.message);
@@ -186,21 +147,30 @@ app.post('/youcom', async (req, res) => {
 });
 
 // ═══════════════════════════════════════════════════════════════════════════
-// BETBURGER API - Updated with multiple endpoint attempts
+// BETBURGER API - FIXED: Uses correct REST API endpoints
+// Live: rest-api-lv.betburger.com
+// Prematch: rest-api-pr.betburger.com
 // ═══════════════════════════════════════════════════════════════════════════
 app.post('/betburger', async (req, res) => {
   try {
-    const { endpoint = 'valuebets', accessToken, sport, perPage = 50 } = req.body;
+    const { accessToken, sport, perPage = 50, live = false } = req.body;
     const key = accessToken || API_KEYS.betburger;
     
     if (!key) {
       return res.status(400).json({ error: 'No API key provided' });
     }
     
-    console.log('BetBurger request for sport:', sport);
+    console.log('BetBurger request for sport:', sport, 'live:', live);
+    
+    // Use correct BetBurger API endpoint
+    const baseUrl = live ? 'https://rest-api-lv.betburger.com' : 'https://rest-api-pr.betburger.com';
     
     // Try valuebets endpoint
-    let url = `https://api.betburger.com/api/v1/valuebets?access_token=${key}&sport=${sport}&per_page=${perPage}`;
+    let url = `${baseUrl}/api/v1/valuebets?access_token=${key}&per_page=${perPage}`;
+    if (sport) url += `&sport=${sport}`;
+    
+    console.log('BetBurger trying:', url.replace(key, 'xxx'));
+    
     let response = await fetch(url, {
       method: 'GET',
       headers: { 'Accept': 'application/json' }
@@ -208,14 +178,16 @@ app.post('/betburger', async (req, res) => {
     
     if (response.ok) {
       const data = await response.json();
-      console.log('BetBurger valuebets success, count:', data.valuebets?.length || 0);
+      console.log('BetBurger valuebets success, count:', data.valuebets?.length || data.bets?.length || 0);
       return res.json(data);
     }
     
     console.log('BetBurger valuebets failed:', response.status);
     
     // Try arbs endpoint
-    url = `https://api.betburger.com/api/v1/arbs?access_token=${key}&sport=${sport}&per_page=30`;
+    url = `${baseUrl}/api/v1/arbs?access_token=${key}&per_page=${perPage}`;
+    if (sport) url += `&sport=${sport}`;
+    
     response = await fetch(url, {
       method: 'GET',
       headers: { 'Accept': 'application/json' }
@@ -229,36 +201,25 @@ app.post('/betburger', async (req, res) => {
     
     console.log('BetBurger arbs failed:', response.status);
     
-    // Try middles endpoint
-    url = `https://api.betburger.com/api/v1/middles?access_token=${key}&sport=${sport}&per_page=30`;
+    // Try the old API as fallback
+    url = `https://api.betburger.com/api/v1/valuebets?access_token=${key}&per_page=${perPage}`;
+    if (sport) url += `&sport=${sport}`;
+    
     response = await fetch(url, {
-      method: 'GET',
+      method: 'GET', 
       headers: { 'Accept': 'application/json' }
     });
     
     if (response.ok) {
       const data = await response.json();
-      console.log('BetBurger middles success');
+      console.log('BetBurger old API success');
       return res.json(data);
     }
     
-    // Try bets endpoint (general)
-    url = `https://api.betburger.com/api/v1/bets?access_token=${key}&per_page=30`;
-    response = await fetch(url, {
-      method: 'GET',
-      headers: { 'Accept': 'application/json' }
-    });
-    
-    if (response.ok) {
-      const data = await response.json();
-      console.log('BetBurger bets success');
-      return res.json(data);
-    }
-    
-    // All endpoints failed - return error with status
+    // All failed
     const errorText = await response.text();
-    console.error('BetBurger all endpoints failed:', response.status, errorText);
-    throw new Error(`BetBurger API returned ${response.status}: ${errorText.substring(0, 200)}`);
+    console.error('BetBurger all endpoints failed:', response.status, errorText.substring(0, 200));
+    throw new Error(`BetBurger API returned ${response.status}`);
     
   } catch (error) {
     console.error('BetBurger error:', error.message);
@@ -267,7 +228,7 @@ app.post('/betburger', async (req, res) => {
 });
 
 // ═══════════════════════════════════════════════════════════════════════════
-// BALLDONTLIE API - NEW API (requires API key now)
+// BALLDONTLIE API - Uses new API with key
 // ═══════════════════════════════════════════════════════════════════════════
 app.post('/balldontlie', async (req, res) => {
   try {
@@ -278,21 +239,25 @@ app.post('/balldontlie', async (req, res) => {
     
     if (!key) {
       return res.status(400).json({ 
-        error: 'No BallDontLie API key provided',
-        note: 'Add BALLDONTLIE_API_KEY to environment variables'
+        error: 'No BallDontLie API key',
+        note: 'Add BALLDONTLIE_API_KEY to Render environment variables'
       });
     }
     
-    // Use the NEW API endpoint
+    // Search for player
     const searchUrl = `https://api.balldontlie.io/v1/players?search=${encodeURIComponent(player)}`;
+    console.log('BallDontLie searching:', searchUrl);
+    
     const searchResponse = await fetch(searchUrl, {
       headers: { 'Authorization': key }
     });
     
+    console.log('BallDontLie search status:', searchResponse.status);
+    
     if (!searchResponse.ok) {
       const errorText = await searchResponse.text();
       console.error('BallDontLie search failed:', searchResponse.status, errorText);
-      throw new Error(`BallDontLie API returned ${searchResponse.status}`);
+      throw new Error(`BallDontLie returned ${searchResponse.status}`);
     }
     
     const searchData = await searchResponse.json();
@@ -303,7 +268,7 @@ app.post('/balldontlie', async (req, res) => {
     }
     
     const playerData = searchData.data[0];
-    console.log('BallDontLie: Found player', playerData.first_name, playerData.last_name);
+    console.log('BallDontLie found:', playerData.first_name, playerData.last_name, 'ID:', playerData.id);
     
     // Get season averages
     const statsUrl = `https://api.balldontlie.io/v1/season_averages?player_id=${playerData.id}`;
@@ -311,27 +276,30 @@ app.post('/balldontlie', async (req, res) => {
       headers: { 'Authorization': key }
     });
     
+    console.log('BallDontLie stats status:', statsResponse.status);
+    
     if (statsResponse.ok) {
       const statsData = await statsResponse.json();
       const stats = statsData.data?.[0];
       
-      console.log('BallDontLie: Got stats, pts:', stats?.pts);
+      console.log('BallDontLie stats:', stats?.pts, 'pts,', stats?.reb, 'reb,', stats?.ast, 'ast');
+      
       return res.json({
         found: true,
         player: playerData,
-        seasonAvg: stats?.pts?.toFixed(1),
-        reb: stats?.reb?.toFixed(1),
-        ast: stats?.ast?.toFixed(1),
-        gamesPlayed: stats?.games_played
+        seasonAvg: stats?.pts?.toFixed(1) || null,
+        reb: stats?.reb?.toFixed(1) || null,
+        ast: stats?.ast?.toFixed(1) || null,
+        gamesPlayed: stats?.games_played || null
       });
     }
     
-    // Return player data even without stats
+    // Return player without stats
     return res.json({
       found: true,
       player: playerData,
       seasonAvg: null,
-      note: 'Stats not available'
+      note: 'Stats endpoint failed'
     });
     
   } catch (error) {
@@ -341,48 +309,22 @@ app.post('/balldontlie', async (req, res) => {
 });
 
 // ═══════════════════════════════════════════════════════════════════════════
-// GENERIC PROXY (for any API)
-// ═══════════════════════════════════════════════════════════════════════════
-app.post('/proxy', async (req, res) => {
-  try {
-    const { url, method = 'GET', headers = {}, body } = req.body;
-    
-    console.log('Generic proxy request to:', url);
-    
-    const response = await fetch(url, {
-      method,
-      headers,
-      body: body ? JSON.stringify(body) : undefined
-    });
-    
-    const data = await response.json();
-    res.json(data);
-  } catch (error) {
-    console.error('Proxy error:', error.message);
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// ═══════════════════════════════════════════════════════════════════════════
-// TEST ENDPOINTS - For debugging
+// TEST ENDPOINTS
 // ═══════════════════════════════════════════════════════════════════════════
 app.get('/test/youcom', async (req, res) => {
   try {
     const key = API_KEYS.youcom;
     if (!key) return res.json({ error: 'No YOUCOM_API_KEY set' });
     
-    const response = await fetch('https://api.ydc-index.io/news', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-API-Key': key
-      },
-      body: JSON.stringify({ q: 'NBA basketball', count: 2 })
+    const url = `https://api.ydc-index.io/v1/search?query=${encodeURIComponent('NBA basketball news')}`;
+    const response = await fetch(url, {
+      method: 'GET',
+      headers: { 'X-API-Key': key }
     });
     
     const status = response.status;
     const data = await response.json().catch(() => response.text());
-    res.json({ status, data });
+    res.json({ status, hasResults: !!data?.results?.web?.length, data: typeof data === 'object' ? { resultsCount: data?.results?.web?.length } : data });
   } catch (error) {
     res.json({ error: error.message });
   }
@@ -393,10 +335,22 @@ app.get('/test/betburger', async (req, res) => {
     const key = API_KEYS.betburger;
     if (!key) return res.json({ error: 'No BETBURGER_API_KEY set' });
     
-    const response = await fetch(`https://api.betburger.com/api/v1/bets?access_token=${key}&per_page=2`);
-    const status = response.status;
-    const data = await response.json().catch(() => response.text());
-    res.json({ status, data });
+    // Try prematch API
+    const prUrl = `https://rest-api-pr.betburger.com/api/v1/valuebets?access_token=${key}&per_page=2`;
+    const prResponse = await fetch(prUrl);
+    const prStatus = prResponse.status;
+    const prData = await prResponse.json().catch(() => prResponse.text());
+    
+    // Try live API  
+    const lvUrl = `https://rest-api-lv.betburger.com/api/v1/arbs?access_token=${key}&per_page=2`;
+    const lvResponse = await fetch(lvUrl);
+    const lvStatus = lvResponse.status;
+    const lvData = await lvResponse.json().catch(() => lvResponse.text());
+    
+    res.json({ 
+      prematch: { status: prStatus, hasData: !!prData?.valuebets?.length || !!prData?.bets?.length },
+      live: { status: lvStatus, hasData: !!lvData?.arbs?.length }
+    });
   } catch (error) {
     res.json({ error: error.message });
   }
@@ -404,28 +358,48 @@ app.get('/test/betburger', async (req, res) => {
 
 app.get('/test/balldontlie', async (req, res) => {
   try {
-    // Test old API
-    const oldResponse = await fetch('https://www.balldontlie.io/api/v1/players?search=LeBron');
-    const oldStatus = oldResponse.status;
-    const oldData = await oldResponse.json().catch(() => 'parse error');
+    const key = API_KEYS.balldontlie;
+    if (!key) return res.json({ error: 'No BALLDONTLIE_API_KEY set', note: 'Add it to Render env vars' });
+    
+    const url = `https://api.balldontlie.io/v1/players?search=LeBron`;
+    const response = await fetch(url, {
+      headers: { 'Authorization': key }
+    });
+    
+    const status = response.status;
+    const data = await response.json().catch(() => response.text());
     
     res.json({ 
-      oldApi: { status: oldStatus, hasData: !!oldData?.data?.length },
-      note: 'New API requires key from https://www.balldontlie.io/'
+      status, 
+      hasData: !!data?.data?.length,
+      playerFound: data?.data?.[0]?.first_name + ' ' + data?.data?.[0]?.last_name
     });
   } catch (error) {
     res.json({ error: error.message });
   }
 });
 
+// ═══════════════════════════════════════════════════════════════════════════
+// GENERIC PROXY
+// ═══════════════════════════════════════════════════════════════════════════
+app.post('/proxy', async (req, res) => {
+  try {
+    const { url, method = 'GET', headers = {}, body } = req.body;
+    
+    const response = await fetch(url, {
+      method,
+      headers,
+      body: body ? JSON.stringify(body) : undefined
+    });
+    
+    const data = await response.json();
+    res.json(data);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 app.listen(PORT, () => {
-  console.log(`SBA GENIUS Proxy v2.1 running on port ${PORT}`);
-  console.log('Environment variables loaded:');
-  console.log('  GROK_API_KEY:', API_KEYS.grok ? 'SET' : 'NOT SET');
-  console.log('  ODDS_API_KEY:', API_KEYS.oddsApi ? 'SET' : 'NOT SET');
-  console.log('  YOUCOM_API_KEY:', API_KEYS.youcom ? 'SET' : 'NOT SET');
-  console.log('  BETBURGER_API_KEY:', API_KEYS.betburger ? 'SET' : 'NOT SET');
-  console.log('  POE_API_KEY:', API_KEYS.poe ? 'SET' : 'NOT SET');
-  console.log('  MISTRAL_API_KEY:', API_KEYS.mistral ? 'SET' : 'NOT SET');
-  console.log('  BALLDONTLIE_API_KEY:', API_KEYS.balldontlie ? 'SET' : 'NOT SET');
+  console.log(`SBA GENIUS Proxy v2.2 running on port ${PORT}`);
+  console.log('Keys configured:', Object.entries(API_KEYS).map(([k,v]) => `${k}:${v?'YES':'NO'}`).join(', '));
 });
